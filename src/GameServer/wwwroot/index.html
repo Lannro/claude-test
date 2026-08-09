@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>GameServer Hello World</title>
+<script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@8.6.6/dist/pixi.min.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  section { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+  h2 { margin-top: 0; font-size: 1rem; }
+  pre { background: #f4f4f4; padding: 0.5rem; overflow-x: auto; }
+  button { cursor: pointer; }
+  #canvas-holder { width: 300px; height: 200px; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+
+<h1>GameServer scaffold</h1>
+
+<section>
+  <h2>REST API</h2>
+  <button id="hello-btn">GET /api/hello</button>
+  <button id="ping-btn">POST /api/ping (writes to Postgres)</button>
+  <button id="counter-btn">GET /api/counter (increments in Redis)</button>
+  <pre id="rest-output">(no requests yet)</pre>
+</section>
+
+<section>
+  <h2>SignalR (WebSocket)</h2>
+  <p>Status: <span id="signalr-status">connecting...</span></p>
+  <input id="message-input" placeholder="say hello" />
+  <button id="send-btn">Send</button>
+  <pre id="messages"></pre>
+</section>
+
+<section>
+  <h2>WebGL canvas (PixiJS)</h2>
+  <div id="canvas-holder"></div>
+</section>
+
+<script>
+  const restOutput = document.getElementById('rest-output');
+
+  document.getElementById('hello-btn').addEventListener('click', async () => {
+    const res = await fetch('/api/hello');
+    restOutput.textContent = JSON.stringify(await res.json(), null, 2);
+  });
+
+  document.getElementById('ping-btn').addEventListener('click', async () => {
+    await fetch('/api/ping', { method: 'POST' });
+    const res = await fetch('/api/ping');
+    restOutput.textContent = JSON.stringify(await res.json(), null, 2);
+  });
+
+  document.getElementById('counter-btn').addEventListener('click', async () => {
+    const res = await fetch('/api/counter');
+    restOutput.textContent = JSON.stringify(await res.json(), null, 2);
+  });
+
+  const statusEl = document.getElementById('signalr-status');
+  const messagesEl = document.getElementById('messages');
+
+  const connection = new signalR.HubConnectionBuilder()
+    .withUrl('/hubs/game')
+    .withAutomaticReconnect()
+    .build();
+
+  connection.on('ReceiveMessage', (user, message) => {
+    messagesEl.textContent += `${user}: ${message}\n`;
+  });
+
+  connection.start()
+    .then(() => { statusEl.textContent = 'connected'; })
+    .catch(err => { statusEl.textContent = 'failed: ' + err; });
+
+  document.getElementById('send-btn').addEventListener('click', () => {
+    const input = document.getElementById('message-input');
+    if (!input.value) return;
+    connection.invoke('SendMessage', 'player', input.value);
+    input.value = '';
+  });
+
+  (async () => {
+    const app = new PIXI.Application();
+    await app.init({ width: 300, height: 200, backgroundColor: 0x1a1a2e });
+    document.getElementById('canvas-holder').appendChild(app.canvas);
+
+    const box = new PIXI.Graphics().rect(0, 0, 40, 40).fill(0x4cc9f0);
+    box.x = 10;
+    box.y = 80;
+    app.stage.addChild(box);
+
+    let direction = 1;
+    app.ticker.add(() => {
+      box.x += direction * 2;
+      if (box.x > 260 || box.x < 0) direction *= -1;
+    });
+  })();
+</script>
+
+</body>
+</html>

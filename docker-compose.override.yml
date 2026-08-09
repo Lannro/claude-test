@@ -1,0 +1,17 @@
+# Auto-loaded by `docker compose` alongside docker-compose.yml when no -f
+# flags are given. Restores host port publishing for local dev only, so
+# `docker compose up --build` / `docker compose up postgres redis -d`
+# keep working exactly as before. Not used in production
+# (docker-compose.prod.yml is loaded explicitly instead, without this file).
+services:
+  api:
+    ports:
+      - "8080:8080"
+
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"

@@ -1,0 +1,35 @@
+# Production overlay. Run with both files explicitly (this repo's override.yml
+# is NOT auto-loaded once -f is given, so dev-only port publishing is skipped):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Caddy is the only public entrypoint (80/443); api/postgres/redis stay
+# internal to the compose network. Requires a .env file (see .env.example)
+# with DOMAIN and POSTGRES_PASSWORD set.
+services:
+  api:
+    environment:
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=gamedb;Username=gameuser;Password=${POSTGRES_PASSWORD}"
+
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:
