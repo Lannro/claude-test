@@ -3,33 +3,32 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
-# Caddy is the only public entrypoint (80/443); api/postgres/redis stay
-# internal to the compose network. Requires a .env file (see .env.example)
-# with DOMAIN and POSTGRES_PASSWORD set.
+# Traefik is already running on the host outside this compose project and is
+# the sole public entrypoint (80/443); api/postgres/redis publish no host
+# ports at all. Requires a .env file (see .env.example) with DOMAIN and
+# POSTGRES_PASSWORD set, and assumes Traefik is attached to an external
+# Docker network named "web", with a "websecure" entrypoint and a
+# certresolver named "myresolver" - adjust the labels below to match your
+# actual Traefik setup if it uses different names.
 services:
   api:
     environment:
       ConnectionStrings__Default: "Host=postgres;Port=5432;Database=gamedb;Username=gameuser;Password=${POSTGRES_PASSWORD}"
+    networks:
+      - default
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.snakegame.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.snakegame.entrypoints=websecure"
+      - "traefik.http.routers.snakegame.tls.certresolver=myresolver"
+      - "traefik.http.services.snakegame.loadbalancer.server.port=8080"
 
   postgres:
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      DOMAIN: ${DOMAIN}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - api
-
-volumes:
-  caddy_data:
-  caddy_config:
+networks:
+  web:
+    external: true

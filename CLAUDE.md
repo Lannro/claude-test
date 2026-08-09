@@ -4,11 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Early-stage scaffold for a browser-based multiplayer game. Single ASP.NET Core (C#) project
-combining a REST API, a SignalR hub, and EF Core/Postgres persistence, plus a static
-`wwwroot/index.html` client that exercises all three (REST fetch, SignalR chat, and a
-WebGL canvas via PixiJS). Nothing here is game logic yet — it's the "hello world" plumbing
-proving the stack talks to itself end to end.
+Early-stage browser-based multiplayer game. Single ASP.NET Core (C#) project combining a
+REST API, a SignalR hub, EF Core/Postgres persistence, and a static `wwwroot/index.html`
+client (REST fetch buttons, SignalR chat, and a PixiJS canvas). What was originally pure
+"hello world" plumbing now also has real game logic: a simple slither.io-style multiplayer
+snake prototype (see `Game/` below) — first cut of pivoting this scaffold toward "the real
+idea," still very much a prototype (in-memory only, no auth).
 
 ## Commands
 
@@ -76,26 +77,34 @@ above are unaffected by it.
 
 ## Production / external access
 
-For making this reachable from outside the local network permanently (not just testing),
-the stack runs on a VPS behind a Caddy reverse proxy that owns TLS for a real domain:
+The VPS already runs Traefik (a separate, pre-existing deployment outside this compose
+project) as the host's shared reverse proxy, so this stack doesn't run its own — it just joins
+Traefik's network and gets picked up via labels:
 
 ```
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-- `docker-compose.prod.yml` adds the `caddy` service (publishes 80/443, terminates TLS via
-  Let's Encrypt using `Caddyfile`) and stops `api`/`postgres`/`redis` from publishing any host
-  ports directly — Caddy is the only public entrypoint. Note this explicit `-f` invocation does
-  **not** auto-load `docker-compose.override.yml`, so dev port publishing doesn't apply here.
+- `docker-compose.prod.yml` attaches `api` to the external `web` Docker network (where Traefik
+  listens) alongside the default compose network (for `postgres`/`redis`), and adds
+  `traefik.*` labels: a `Host(${DOMAIN})` router on the `websecure` entrypoint, TLS via a
+  certresolver named `myresolver`, forwarding to the container's real port `8080`. **These
+  three names (network/entrypoint/certresolver) must match the actual Traefik setup on the
+  host** — check with `docker inspect <traefik_container> --format '{{json .NetworkSettings.Networks}}'`
+  and its startup args if they ever change. `api`/`postgres`/`redis` publish no host ports at
+  all — Traefik is the only public entrypoint. There used to be a self-contained Caddy service
+  here instead; it was removed once Traefik entered the picture, since running both fighting
+  over the same domain's TLS cert was the cause of a gateway-timeout outage.
 - Requires a `.env` file on the host (copy `.env.example`) with `DOMAIN` (must already have an
   A record pointed at the VPS) and a real `POSTGRES_PASSWORD` — don't reuse the local dev
   `gamepass`.
-- `Program.cs` trusts Caddy's `X-Forwarded-*` headers via `UseForwardedHeaders` so the app sees
-  the real client IP/scheme; this is safe only because Caddy is the sole thing that can reach
-  `api` on the compose network.
-- **No auth exists on any endpoint or the SignalR hub.** Once this is on a public domain,
-  anyone with the link can read/write ping logs, bump the Redis counter, and join the chat hub.
-  Fine for a scaffold, but add auth before relying on this being private in practice.
+- `Program.cs` trusts the proxy's `X-Forwarded-*` headers via `UseForwardedHeaders` so the app
+  sees the real client IP/scheme; this is safe only because Traefik is the sole thing that can
+  reach `api` on the `web` network.
+- **No auth exists on any endpoint, the SignalR hub, or the snake game.** Once this is on a
+  public domain, anyone with the link can read/write ping logs, bump the Redis counter, join
+  the chat hub, and play. Fine for a scaffold, but add auth before relying on this being
+  private in practice.
 
 ## Open items / in-progress debugging
 
@@ -104,4 +113,5 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
   produces), which points to Firefox hitting a different port/server than Chrome — most
   likely diverged address-bar autocomplete/history between the two browsers rather than a
   real server bug. Next step was to compare the exact URLs each browser is loading.
-- No auth, no real game logic, no tests yet — this is intentionally just the scaffold.
+- No auth and no tests yet. Game logic exists now (see `Game/`) but is still a prototype —
+  in-memory state, no persistence, minimal rules by design.
