@@ -6,12 +6,14 @@
 <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pixi.js@8.6.6/dist/pixi.min.js"></script>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  body { font-family: system-ui, sans-serif; max-width: 1060px; margin: 2rem auto; padding: 0 1rem; }
   section { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
   h2 { margin-top: 0; font-size: 1rem; }
   pre { background: #f4f4f4; padding: 0.5rem; overflow-x: auto; }
   button { cursor: pointer; }
-  #canvas-holder { width: 300px; height: 200px; border: 1px solid #ccc; }
+  #canvas-holder { width: 1000px; max-width: 100%; aspect-ratio: 1000 / 700; border: 1px solid #ccc; }
+  #canvas-holder canvas { width: 100%; height: 100%; display: block; }
+  #leaderboard { width: 12rem; }
 </style>
 </head>
 <body>
@@ -35,8 +37,14 @@
 </section>
 
 <section>
-  <h2>WebGL canvas (PixiJS)</h2>
+  <h2>Snake arena (SignalR + PixiJS, server-authoritative)</h2>
+  <p id="game-status">Enter a name and click Play, then move your mouse over the arena to steer.</p>
+  <div>
+    <input id="name-input" placeholder="your name" maxlength="16" />
+    <button id="join-btn" disabled>Play</button>
+  </div>
   <div id="canvas-holder"></div>
+  <pre id="leaderboard">(leaderboard appears once players join)</pre>
 </section>
 
 <script>
@@ -60,6 +68,10 @@
 
   const statusEl = document.getElementById('signalr-status');
   const messagesEl = document.getElementById('messages');
+  const gameStatusEl = document.getElementById('game-status');
+  const joinBtn = document.getElementById('join-btn');
+  const nameInput = document.getElementById('name-input');
+  const leaderboardEl = document.getElementById('leaderboard');
 
   const connection = new signalR.HubConnectionBuilder()
     .withUrl('/hubs/game')
@@ -70,8 +82,27 @@
     messagesEl.textContent += `${user}: ${message}\n`;
   });
 
+  let myConnectionId = null;
+  let latestSnapshot = null;
+
+  connection.on('StateUpdate', (snapshot) => {
+    latestSnapshot = snapshot;
+    draw(snapshot);
+    leaderboardEl.textContent = snapshot.leaderboard.length
+      ? snapshot.leaderboard.map((e, i) => `${i + 1}. ${e.name} (${e.length})`).join('\n')
+      : '(leaderboard appears once players join)';
+  });
+
+  connection.on('Died', () => {
+    gameStatusEl.textContent = 'You died! Click Play to respawn.';
+  });
+
   connection.start()
-    .then(() => { statusEl.textContent = 'connected'; })
+    .then(() => {
+      statusEl.textContent = 'connected';
+      myConnectionId = connection.connectionId;
+      joinBtn.disabled = false;
+    })
     .catch(err => { statusEl.textContent = 'failed: ' + err; });
 
   document.getElementById('send-btn').addEventListener('click', () => {
@@ -81,22 +112,65 @@
     input.value = '';
   });
 
+  joinBtn.addEventListener('click', async () => {
+    await connection.invoke('Join', nameInput.value.trim() || 'Snake');
+    gameStatusEl.textContent = 'Move your mouse over the arena to steer.';
+  });
+
+  let graphics;
+
   (async () => {
     const app = new PIXI.Application();
-    await app.init({ width: 300, height: 200, backgroundColor: 0x1a1a2e });
+    await app.init({ width: 1000, height: 700, backgroundColor: 0x0f172a });
     document.getElementById('canvas-holder').appendChild(app.canvas);
 
-    const box = new PIXI.Graphics().rect(0, 0, 40, 40).fill(0x4cc9f0);
-    box.x = 10;
-    box.y = 80;
-    app.stage.addChild(box);
+    graphics = new PIXI.Graphics();
+    app.stage.addChild(graphics);
 
-    let direction = 1;
-    app.ticker.add(() => {
-      box.x += direction * 2;
-      if (box.x > 260 || box.x < 0) direction *= -1;
+    let lastDirectionSentAt = 0;
+    app.canvas.addEventListener('mousemove', (evt) => {
+      if (!myConnectionId || !latestSnapshot) return;
+      const mySnake = latestSnapshot.snakes.find(s => s.id === myConnectionId);
+      if (!mySnake || mySnake.trail.length === 0) return;
+
+      const rect = app.canvas.getBoundingClientRect();
+      const scaleX = app.canvas.width / rect.width;
+      const scaleY = app.canvas.height / rect.height;
+      const mouseX = (evt.clientX - rect.left) * scaleX;
+      const mouseY = (evt.clientY - rect.top) * scaleY;
+      const head = mySnake.trail[0];
+      const angle = Math.atan2(mouseY - head.y, mouseX - head.x);
+
+      const now = performance.now();
+      if (now - lastDirectionSentAt > 50) {
+        connection.invoke('SetDirection', angle);
+        lastDirectionSentAt = now;
+      }
     });
   })();
+
+  function draw(snapshot) {
+    if (!graphics) return;
+    graphics.clear();
+
+    graphics.rect(0, 0, snapshot.arenaWidth, snapshot.arenaHeight).stroke({ width: 2, color: 0x334155 });
+
+    for (const f of snapshot.food) {
+      graphics.circle(f.x, f.y, 3).fill(0xffe066);
+    }
+
+    for (const s of snapshot.snakes) {
+      const color = parseInt(s.color.slice(1), 16);
+      for (const p of s.trail) {
+        graphics.circle(p.x, p.y, 6).fill(color);
+      }
+      if (s.trail.length > 0) {
+        const head = s.trail[0];
+        graphics.circle(head.x, head.y, 8).fill(0xffffff);
+        graphics.circle(head.x, head.y, 6).fill(color);
+      }
+    }
+  }
 </script>
 
 </body>

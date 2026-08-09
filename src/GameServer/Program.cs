@@ -1,4 +1,5 @@
 using GameServer.Data;
+using GameServer.Game;
 using GameServer.Hubs;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +8,8 @@ using StackExchange.Redis;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<GameWorld>();
+builder.Services.AddHostedService<GameLoopService>();
 
 builder.Services.AddDbContext<GameDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));

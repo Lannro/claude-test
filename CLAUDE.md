@@ -45,13 +45,24 @@ above are unaffected by it.
 - **`Data/GameDbContext.cs`, `Data/PingLog.cs`** — EF Core + Npgsql. Schema is created via
   `Database.EnsureCreated()` at startup (see `Program.cs`), not migrations. Switch to
   `dotnet ef migrations` once the schema needs to evolve past this scaffold.
-- **`Hubs/GameHub.cs`** — SignalR hub mapped at `/hubs/game`. This is where real-time
-  game-state broadcast will eventually live; currently just an echo (`SendMessage` ->
-  `ReceiveMessage`). If/when this needs to scale independently of the REST API, it's the
-  piece to split into its own project/process.
+- **`Hubs/GameHub.cs`** — SignalR hub mapped at `/hubs/game`. Still has the original echo
+  (`SendMessage` -> `ReceiveMessage`) alongside the real game entry points: `Join(name)` spawns
+  a snake for the caller, `SetDirection(angle)` steers it, and `OnDisconnectedAsync` despawns it.
+  If/when this needs to scale independently of the REST API, it's the piece to split into its
+  own project/process.
+- **`Game/`** — the first real game logic: a simple multiplayer snake prototype, slither.io-style
+  (continuous movement/free-angle steering, not grid-based). `GameWorld.cs` is a singleton
+  holding all state (snakes, food, arena bounds) and the tick/collision/food rules; it's
+  **in-memory only** — no Postgres/Redis involvement, so state resets on restart/redeploy, which
+  is fine for a prototype. `GameLoopService.cs` is a `BackgroundService` ticking the world at
+  20 Hz and broadcasting a `StateUpdate` snapshot to all clients via `IHubContext<GameHub>`.
+  Deliberately out of scope for now (easy fast-follows once this is fun to play): no camera/
+  scrolling (arena == canvas size), no self-collision (matches slither.io), no food-drop-on-death.
 - **`wwwroot/index.html`** — plain JS client, no build step. Loads SignalR JS client and
-  PixiJS from CDN via `<script>` tags. Serves as the manual integration test for the whole
-  stack (buttons for each REST endpoint, a SignalR chat box, a bouncing WebGL sprite).
+  PixiJS from CDN via `<script>` tags. Has buttons for each REST endpoint and a SignalR chat
+  box (the original integration-test scaffold), plus the actual snake game: a name/Play form,
+  a 1000x700 PixiJS canvas rendering `StateUpdate` snapshots (snap-to-latest, no interpolation),
+  mouse-move-to-steer input throttled to roughly the server tick rate, and a text leaderboard.
 - **`docker-compose.yml`** — three services: `api`, `postgres`, `redis`. `api` depends on the
   other two via `condition: service_healthy` — this matters because Postgres/Redis take a
   moment to become ready on first boot, and `EnsureCreated()` at startup crashes the app
